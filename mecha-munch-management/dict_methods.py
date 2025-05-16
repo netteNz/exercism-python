@@ -8,8 +8,14 @@ def add_item(current_cart, items_to_add):
     :param items_to_add: iterable - items to add to the cart.
     :return: dict - the updated user cart dictionary.
     """
-
-    pass
+    for item in items_to_add:
+        # if the item is already in the cart, increment the quantity
+        if item in current_cart:
+            current_cart[item] += 1
+        # otherwise, add the item to the cart with a quantity of 1
+        else:
+            current_cart[item] = 1
+    return current_cart
 
 
 def read_notes(notes):
