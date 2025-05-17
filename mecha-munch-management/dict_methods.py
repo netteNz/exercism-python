@@ -10,11 +10,7 @@ def add_item(current_cart, items_to_add):
     """
     for item in items_to_add:
         # if the item is already in the cart, increment the quantity
-        if item in current_cart:
-            current_cart[item] += 1
-        # otherwise, add the item to the cart with a quantity of 1
-        else:
-            current_cart[item] = 1
+        current_cart[item] = current_cart.get(item, 0) + 1
     return current_cart
 
 
@@ -24,8 +20,10 @@ def read_notes(notes):
     :param notes: iterable of items to add to cart.
     :return: dict - a user shopping cart dictionary.
     """
-
-    pass
+    cart = {}
+    for item in notes:
+        cart[item] = cart.get(item, 0) + 1
+    return cart
 
 
 def update_recipes(ideas, recipe_updates):
@@ -35,8 +33,7 @@ def update_recipes(ideas, recipe_updates):
     :param recipe_updates: dict - dictionary with updates for the ideas section.
     :return: dict - updated "recipe ideas" dict.
     """
-
-    pass
+    
 
 
 def sort_entries(cart):
