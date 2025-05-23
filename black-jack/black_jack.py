@@ -15,9 +15,14 @@ def value_of_card(card):
     2.  'A' (ace card) = 1
     3.  '2' - '10' = numerical value.
     """
-
-    pass
-
+    # Check if the card is a face card (J, Q, K)
+    if card in ['J', 'Q', 'K']:
+        return 10
+    elif card == 'A':
+        return 1
+    else:
+        return int(card)
+    
 
 def higher_card(card_one, card_two):
     """Determine which card has a higher value in the hand.
@@ -29,9 +34,17 @@ def higher_card(card_one, card_two):
     2.  'A' (ace card) = 1
     3.  '2' - '10' = numerical value.
     """
-
-    pass
-
+    # get value of both cards
+    card_one_value = value_of_card(card_one)
+    card_two_value = value_of_card(card_two)
+    
+    # compare the values
+    if card_one_value > card_two_value:
+        return card_one
+    elif card_two_value > card_one_value:
+        return card_two
+    else:
+        return (card_one, card_two)  # return both cards as a tuple if they are equal
 
 def value_of_ace(card_one, card_two):
     """Calculate the most advantageous value for the ace card.
@@ -43,10 +56,12 @@ def value_of_ace(card_one, card_two):
     2.  'A' (ace card) = 11 (if already in hand)
     3.  '2' - '10' = numerical value.
     """
-
-    pass
-
-
+    # get the value of the other card
+    if card_one == 'A' or card_two == 'A':
+        return 1
+    total = value_of_card(card_one) + value_of_card(card_two)
+    return 11 if total + 11 <= 21 else 1
+    
 def is_blackjack(card_one, card_two):
     """Determine if the hand is a 'natural' or 'blackjack'.
 
