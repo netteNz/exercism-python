@@ -4,6 +4,8 @@ import json
 import shlex
 import difflib
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
@@ -17,6 +19,16 @@ RULES_PATH = AGENT_DIR / "AGENT_RULES.md"
 
 DEFAULT_COPILOT_CMD = os.environ.get("COPILOT_CMD", "").strip()
 DEFAULT_COPILOT_FLAGS = os.environ.get("COPILOT_FLAGS", "").strip()
+
+DEFAULT_PROVIDER = os.environ.get("LLM_PROVIDER", "copilot").lower()
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+
+# --------- helpers ---------
+def get_env_help(key: str, val: str) -> str:
+    if sys.platform == "win32":
+        return f'  $env:{key}="{val}"  (PowerShell)\n  set {key}={val}      (CMD)'
+    return f'  export {key}="{val}"'
 
 # --------- safety: sandbox paths ---------
 def safe_path(rel: str) -> Path:
@@ -108,7 +120,7 @@ def exercise_paths(slug: str) -> Dict[str, List[Path]]:
 def load_rules() -> str:
     return read_text(RULES_PATH)
 
-# --------- copilot runner ---------
+# --------- llm runners ---------
 def run_copilot(prompt: str) -> str:
     """
     Uses GitHub Copilot CLI in non-interactive prompt mode:
@@ -116,20 +128,22 @@ def run_copilot(prompt: str) -> str:
     """
     if not DEFAULT_COPILOT_CMD:
         raise RuntimeError(
-            'COPILOT_CMD is not set. Run:\n'
-            '  setx COPILOT_CMD "copilot"\n'
-            '  setx COPILOT_FLAGS "-s --no-color --stream off"\n'
-            'Then open a new terminal.'
+            f'COPILOT_CMD is not set. Run:\n'
+            f'{get_env_help("COPILOT_CMD", "copilot")}\n'
+            f'{get_env_help("COPILOT_FLAGS", "-s --no-color --stream off")}'
         )
 
-    cmd = shlex.split(DEFAULT_COPILOT_CMD)
+    # shlex.split is generally posix-oriented. On Windows, standard command parsing 
+    # is simpler, but for basic flags it works. If using paths with backslashes on Windows, 
+    # ensure they are escaped or use forward slashes.
+    cmd = shlex.split(DEFAULT_COPILOT_CMD, posix=(sys.platform != "win32"))
 
     # Non-interactive prompt mode
     cmd += ["-p", prompt]
 
     # Script-friendly flags
     if DEFAULT_COPILOT_FLAGS:
-        cmd += shlex.split(DEFAULT_COPILOT_FLAGS)
+        cmd += shlex.split(DEFAULT_COPILOT_FLAGS, posix=(sys.platform != "win32"))
 
     # Restrict Copilot file access to this Exercism track directory
     cmd += ["--add-dir", str(WORKSPACE)]
@@ -148,6 +162,66 @@ def run_copilot(prompt: str) -> str:
         raise RuntimeError(f"Copilot CLI failed (exit {proc.returncode}):\n{err}")
 
     return (proc.stdout or "").strip()
+
+def run_gemini(prompt: str) -> str:
+    """
+    Uses Google Gemini CLI (gemini command).
+    Falls back to API if GEMINI_API_KEY is set.
+    """
+    # Try CLI first
+    try:
+        proc = subprocess.run(
+            ["gemini", prompt],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            shell=False
+        )
+        
+        if proc.returncode == 0:
+            return (proc.stdout or "").strip()
+    except FileNotFoundError:
+        pass  # gemini CLI not found, try API
+    
+    # Fallback to API if key is provided
+    if not GEMINI_API_KEY:
+        raise RuntimeError(
+            f"Gemini CLI failed and GEMINI_API_KEY is not set.\n"
+            f"Either install gemini CLI (https://github.com/danielmiessler/fabric) or set:\n"
+            f"{get_env_help('GEMINI_API_KEY', 'your_key_here')}"
+        )
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(req) as resp:
+            result = json.load(resp)
+            candidates = result.get("candidates", [])
+            if not candidates:
+                return ""
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if not parts:
+                return ""
+            return parts[0].get("text", "")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Gemini API failed (HTTP {e.code}): {err_body}")
+    except Exception as e:
+        raise RuntimeError(f"Gemini API request failed: {e}")
+
+def run_llm(prompt: str) -> str:
+    if DEFAULT_PROVIDER == "gemini":
+        return run_gemini(prompt)
+    else:
+        return run_copilot(prompt)
 
 
 # --------- prompt builders ---------
@@ -257,13 +331,13 @@ CONTEXT (if any):
 # --------- commands ---------
 def cmd_explain(slug: str) -> None:
     context, _ = build_context(slug)
-    out = run_copilot(prompt_explain(slug, context))
+    out = run_llm(prompt_explain(slug, context))
     write_text(NOTES_DIR / "exercises" / f"{slug}.md", out)
     print(f"Wrote: _notes/exercises/{slug}.md")
 
 def cmd_hint(slug: str) -> None:
     context, _ = build_context(slug)
-    out = run_copilot(prompt_hint(slug, context))
+    out = run_llm(prompt_hint(slug, context))
     write_text(NOTES_DIR / "exercises" / f"{slug}_hints.md", out)
     print(f"Wrote: _notes/exercises/{slug}_hints.md")
 
@@ -272,7 +346,7 @@ def cmd_review(slug: str) -> None:
     if not paths["mains"]:
         print("No solution file found yet under src/main/java. Solve first, then review.")
         return
-    out = run_copilot(prompt_review(slug, context))
+    out = run_llm(prompt_review(slug, context))
     write_text(REVIEWS_DIR / f"{slug}.md", out)
     print(f"Wrote: _reviews/{slug}.md")
 
@@ -282,7 +356,7 @@ def cmd_syntax(topic_or_slug: str) -> None:
     ex_path = WORKSPACE / topic_or_slug
     if ex_path.exists() and ex_path.is_dir():
         context, _ = build_context(topic_or_slug)
-    out = run_copilot(prompt_syntax(topic_or_slug, context))
+    out = run_llm(prompt_syntax(topic_or_slug, context))
     write_text(NOTES_DIR / "syntax" / f"{topic_or_slug}.md", out)
     print(f"Wrote: _notes/syntax/{topic_or_slug}.md")
 
